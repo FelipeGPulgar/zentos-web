@@ -195,7 +195,45 @@ npm run dev        # Desarrollo (localhost:3000)
 npm run build      # Build producción
 npm run start      # Servir build
 npm run lint       # ESLint
+
+# Migrar los posts de content/blog/*.md a Firestore (requiere credenciales):
+# $env:GOOGLE_APPLICATION_CREDENTIALS="C:\ruta\service-account.json"
+node scripts/firebase-import.mjs [--overwrite]
 ```
+
+---
+
+## Migración a Firebase (backend de esta web)
+
+**Estado**: código completo ✅ · pendiente: login CLI de Firebase, habilitar
+Firestore/Storage en la consola, importar posts y decidir hosting.
+
+| Antes (filesystem) | Ahora (Firebase) |
+|---|---|
+| Posts en `content/blog/*.md` | Firestore colección `posts` (id = slug) |
+| Leads en `data/leads.jsonl` | Firestore colección `leads` |
+| Imágenes en `public/blog/*.webp` | Firebase Storage (`blog/*.webp`) con token de descarga público |
+| Auth del admin (cookie HMAC) | Sin cambios |
+| Webhook de contacto | Sin cambios (`CONTACT_WEBHOOK_URL`) |
+
+### Cómo funciona el modo dual
+- `src/lib/firebase/server.ts` detecta credenciales (`GOOGLE_APPLICATION_CREDENTIALS`,
+  `FIREBASE_SERVICE_ACCOUNT` o ADC de entornos Google como App Hosting).
+- **Con credenciales** → Firestore/Storage son la fuente de verdad.
+- **Sin credenciales** → fallback total al filesystem (comportamiento original),
+  así el sitio siempre funciona aunque Firebase no esté configurado aún.
+- `src/lib/blog.ts` mantiene la misma API (`getAllPosts`, `getPost`,
+  `getLatestPosts`, `savePost`, `removePost`, `getRawContent`) → las páginas
+  no tuvieron que cambiar.
+
+### Pasos de activación
+1. `npx firebase-tools login` (en terminal propia; mi terminal no es interactiva)
+2. Consola → proyecto `zentos-eeca4` → habilitar **Firestore** (Production) y **Storage**
+3. Descargar service account key → `GOOGLE_APPLICATION_CREDENTIALS` (local)
+   o dejar que App Hosting provea ADC (producción)
+4. `node scripts/firebase-import.mjs` para importar los 7 posts
+5. Hosting: **App Hosting** (linkea GitHub, requiere plan Blaze) o el frontend
+   se queda en Amplify/Netlify y Firebase solo guarda datos
 
 ---
 

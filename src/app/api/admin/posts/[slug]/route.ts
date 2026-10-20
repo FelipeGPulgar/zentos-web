@@ -1,13 +1,9 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
-import { writeFile, unlink } from 'fs/promises'
-import path from 'path'
-import { serializePost } from '@/lib/blog'
+import { savePost, removePost } from '@/lib/blog'
 import { isAuthorized, parsePostInput } from '@/lib/admin-posts'
 
 export const runtime = 'nodejs'
-
-const CONTENT_DIR = path.join(process.cwd(), 'content', 'blog')
 
 type Params = { params: { slug: string } }
 
@@ -30,14 +26,7 @@ export async function PUT(request: Request, { params }: Params) {
   }
 
   try {
-    await writeFile(
-      path.join(CONTENT_DIR, `${input.slug}.md`),
-      serializePost(input, input.content),
-      'utf8'
-    )
-    if (oldSlug !== input.slug) {
-      await unlink(path.join(CONTENT_DIR, `${oldSlug}.md`))
-    }
+    await savePost(input, oldSlug)
   } catch (err) {
     console.error('[admin/posts] error al actualizar:', err)
     return NextResponse.json(
@@ -63,7 +52,7 @@ export async function DELETE(_request: Request, { params }: Params) {
   }
 
   try {
-    await unlink(path.join(CONTENT_DIR, `${slug}.md`))
+    await removePost(slug)
   } catch {
     return NextResponse.json({ ok: false, error: 'El artículo no existe.' }, { status: 404 })
   }

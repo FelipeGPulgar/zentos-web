@@ -2,8 +2,10 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
+import { randomUUID } from 'crypto'
 import sharp from 'sharp'
 import { verifySessionToken, COOKIE_NAME } from '@/lib/admin'
+import { getBucket, getStorageBucketName } from '@/lib/firebase/server'
 
 export const runtime = 'nodejs'
 
@@ -45,15 +47,46 @@ export async function POST(request: Request) {
   const buffer = Buffer.from(await file.arrayBuffer())
 
   try {
-    await mkdir(OUTPUT_DIR, { recursive: true })
-
     const filename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.webp`
-    const outputPath = path.join(OUTPUT_DIR, filename)
-
-    await sharp(buffer)
+    const webp = await sharp(buffer)
       .resize({ width: 1600, height: 1200, fit: 'inside', withoutEnlargement: true })
       .webp({ quality: 82, effort: 6 })
-      .toFile(outputPath)
+      .toBuffer()
+
+    const bucket = getBucket()
+
+    if (bucket) {
+      // Firebase Storage con token de descarga (URL pública permanente)
+      const objectPath = `blog/${filename}`
+      const token = randomUUID()
+      const storageFile = bucket.file(objectPath)
+
+      await storageFile.save(webp, {
+        contentType: 'image/webp',
+        resumable: false,
+      })
+
+      await storageFile.setMetadata({
+        cacheControl: 'public, max-age=31536000, immutable',
+        metadata: { firebaseStorageDownloadTokens: token },
+      })
+
+      const url =
+        `https://firebasestorage.googleapis.com/v0/b/${getStorageBucketName()}` +
+        `/o/${encodeURIComponent(objectPath)}?alt=media&token=${token}`
+
+      return NextResponse.json({
+        ok: true,
+        url,
+        storage: 'firebase',
+        originalSize: file.size,
+      })
+    }
+
+    // Fallback local (dev sin credenciales de Firebase)
+    await mkdir(OUTPUT_DIR, { recursive: true })
+    const outputPath = path.join(OUTPUT_DIR, filename)
+    await writeFile(outputPath, webp)
 
     return NextResponse.json({
       ok: true,

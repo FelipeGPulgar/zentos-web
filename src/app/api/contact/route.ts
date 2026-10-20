@@ -93,10 +93,23 @@ export async function POST(request: Request) {
   const entry = JSON.stringify({ ...lead, ip, createdAt: new Date().toISOString() })
 
   try {
-    await mkdir(path.join(process.cwd(), 'data'), { recursive: true })
-    await appendFile(path.join(process.cwd(), 'data', 'leads.jsonl'), `${entry}\n`, 'utf8')
+    const { getDb } = await import('@/lib/firebase/server')
+    const db = getDb()
+
+    if (db) {
+      await db.collection('leads').add({ ...lead, ip, createdAt: new Date().toISOString() })
+    } else {
+      throw new Error('Firestore no configurado: se usa fallback a archivo')
+    }
   } catch (err) {
-    console.error('[contact] no se pudo guardar el lead:', err)
+    // Fallback: archivo local (dev sin credenciales / Firestore caído)
+    console.error('[contact] Firestore no disponible, guardando en archivo:', err)
+    try {
+      await mkdir(path.join(process.cwd(), 'data'), { recursive: true })
+      await appendFile(path.join(process.cwd(), 'data', 'leads.jsonl'), `${entry}\n`, 'utf8')
+    } catch (fileErr) {
+      console.error('[contact] no se pudo guardar el lead:', fileErr)
+    }
   }
 
   try {

@@ -1,13 +1,9 @@
 import { NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
-import { writeFile } from 'fs/promises'
-import path from 'path'
-import { getAllPosts, serializePost } from '@/lib/blog'
+import { getAllPosts, savePost } from '@/lib/blog'
 import { isAuthorized, parsePostInput } from '@/lib/admin-posts'
 
 export const runtime = 'nodejs'
-
-const CONTENT_DIR = path.join(process.cwd(), 'content', 'blog')
 
 export async function GET() {
   if (!isAuthorized()) {
@@ -39,15 +35,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    await writeFile(
-      path.join(CONTENT_DIR, `${input.slug}.md`),
-      serializePost(input, input.content),
-      'utf8'
-    )
+    await savePost(input)
   } catch (err) {
     console.error('[admin/posts] error al crear:', err)
     return NextResponse.json(
-      { ok: false, error: 'No se pudo guardar el archivo del artículo.' },
+      { ok: false, error: 'No se pudo guardar el artículo.' },
       { status: 500 }
     )
   }
