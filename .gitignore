@@ -20,6 +20,10 @@
 .DS_Store
 *.pem
 
+# IDE
+/.idea/
+/.vscode/
+
 # debug
 npm-debug.log*
 yarn-debug.log*
@@ -27,6 +31,9 @@ yarn-error.log*
 
 # local env files
 .env*.local
+
+# leads capturados por el formulario de contacto
+/data/
 
 # vercel
 .vercel
