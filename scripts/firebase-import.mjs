@@ -11,6 +11,7 @@
  */
 
 import { readdir, readFile } from 'fs/promises'
+import { readFileSync, existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { initializeApp, cert, applicationDefault, getApps } from 'firebase-admin/app'
@@ -18,6 +19,7 @@ import { getFirestore } from 'firebase-admin/firestore'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CONTENT_DIR = path.join(__dirname, '..', 'content', 'blog')
+const LOCAL_KEY = path.join(__dirname, '..', 'firebase-service-account.local.json')
 const OVERWRITE = process.argv.includes('--overwrite')
 
 function parseFrontmatter(raw) {
@@ -45,6 +47,7 @@ function parseFrontmatter(raw) {
 function initAdmin() {
   if (getApps().length > 0) return
 
+  // 1) Credenciales explícitas como JSON en variable de entorno
   const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
   if (serviceAccount) {
     initializeApp({
@@ -53,6 +56,15 @@ function initAdmin() {
     return
   }
 
+  // 2) Key local generada por scripts/firebase-setup.mjs --sa-key
+  if (existsSync(LOCAL_KEY)) {
+    initializeApp({
+      credential: cert(JSON.parse(readFileSync(LOCAL_KEY, 'utf8'))),
+    })
+    return
+  }
+
+  // 3) Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS o entorno Google)
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     initializeApp({ credential: applicationDefault() })
     return
@@ -60,8 +72,8 @@ function initAdmin() {
 
   console.error(
     '\n✗ No hay credenciales.\n' +
-      '  Define GOOGLE_APPLICATION_CREDENTIALS apuntando a un JSON de service account\n' +
-      '  (Firebase console → Project settings → Service accounts → Generate new private key)\n'
+      '  Genera una con: node scripts/firebase-setup.mjs --sa-key\n' +
+      '  o define GOOGLE_APPLICATION_CREDENTIALS apuntando a un JSON de service account.\n'
   )
   process.exit(1)
 }

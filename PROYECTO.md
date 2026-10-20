@@ -205,8 +205,26 @@ node scripts/firebase-import.mjs [--overwrite]
 
 ## Migración a Firebase (backend de esta web)
 
-**Estado**: código completo ✅ · pendiente: login CLI de Firebase, habilitar
-Firestore/Storage en la consola, importar posts y decidir hosting.
+**Estado** (20-oct-2026): backend operativo ✅
+
+- Proyecto Firebase: `zentos-eeca4` (número `776367388112`).
+- **Firestore creado y en uso** — región `southamerica-west1` (Santiago),
+  modo `FIRESTORE_NATIVE`. 7 posts importados (id = slug).
+- APIs habilitadas: `firestore`, `storage`, `firebaserules`, `iam`.
+- Service account key local: `firebase-service-account.local.json`
+  (gitignored) generada con `node scripts/firebase-setup.mjs --sa-key`.
+  `src/lib/firebase/server.ts` la detecta automáticamente en local.
+- Verificado end-to-end: post creado solo en Firestore aparece en `/blog`,
+  login admin OK y `/api/admin/posts` lee Firestore.
+- **Pendiente — Storage**: no se pudo crear el bucket por API porque el
+  proyecto no tiene cuenta de facturación (`403 billing account ... absent`).
+  Solución: Firebase Console → Storage → *Get started* (o activar Blaze).
+  Mientras tanto las subidas del admin caen al filesystem (`public/blog/`).
+- **Pendiente — Hosting**: App Hosting requiere plan Blaze + cuenta de
+  facturación, y `zentos-eeca4` no tiene ninguna. Alternativas:
+  (a) agregar cuenta de facturación y desplegar en App Hosting (ADC automático),
+  (b) desplegar el frontend en Netlify/Amplify definiendo `FIREBASE_SERVICE_ACCOUNT`
+  (JSON de la key) como variable de entorno.
 
 | Antes (filesystem) | Ahora (Firebase) |
 |---|---|
@@ -217,8 +235,10 @@ Firestore/Storage en la consola, importar posts y decidir hosting.
 | Webhook de contacto | Sin cambios (`CONTACT_WEBHOOK_URL`) |
 
 ### Cómo funciona el modo dual
-- `src/lib/firebase/server.ts` detecta credenciales (`GOOGLE_APPLICATION_CREDENTIALS`,
-  `FIREBASE_SERVICE_ACCOUNT` o ADC de entornos Google como App Hosting).
+- `src/lib/firebase/server.ts` detecta credenciales, en este orden:
+  `firebase-service-account.local.json` (local), `FIREBASE_SERVICE_ACCOUNT`
+  (JSON en env var, para producción), `GOOGLE_APPLICATION_CREDENTIALS`, o
+  ADC de entornos Google (App Hosting).
 - **Con credenciales** → Firestore/Storage son la fuente de verdad.
 - **Sin credenciales** → fallback total al filesystem (comportamiento original),
   así el sitio siempre funciona aunque Firebase no esté configurado aún.
@@ -226,14 +246,14 @@ Firestore/Storage en la consola, importar posts y decidir hosting.
   `getLatestPosts`, `savePost`, `removePost`, `getRawContent`) → las páginas
   no tuvieron que cambiar.
 
-### Pasos de activación
-1. `npx firebase-tools login` (en terminal propia; mi terminal no es interactiva)
-2. Consola → proyecto `zentos-eeca4` → habilitar **Firestore** (Production) y **Storage**
-3. Descargar service account key → `GOOGLE_APPLICATION_CREDENTIALS` (local)
-   o dejar que App Hosting provea ADC (producción)
-4. `node scripts/firebase-import.mjs` para importar los 7 posts
-5. Hosting: **App Hosting** (linkea GitHub, requiere plan Blaze) o el frontend
-   se queda en Amplify/Netlify y Firebase solo guarda datos
+### Pasos de activación (ya ejecutados)
+1. ✅ `npx firebase-tools login` (como `felipegpulgar@gmail.com`)
+2. ✅ `node scripts/firebase-setup.mjs --sa-key` — habilita APIs, crea la
+   base Firestore y genera la service account key local
+3. ✅ `node scripts/firebase-import.mjs` — 7 posts importados a Firestore
+4. ⏳ Storage: crear bucket desde la consola (*Get started*)
+5. ⏳ Hosting: App Hosting (requiere Blaze) o Netlify/Amplify con
+   `FIREBASE_SERVICE_ACCOUNT` como env var
 
 ---
 

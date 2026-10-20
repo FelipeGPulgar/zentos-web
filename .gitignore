@@ -32,6 +32,9 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# credenciales de servicio de Firebase (local, nunca subir)
+firebase-service-account.local.json
+
 # leads capturados por el formulario de contacto
 /data/
 

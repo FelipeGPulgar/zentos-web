@@ -1,4 +1,5 @@
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
+import path from 'path'
 import { getApps, initializeApp, cert, applicationDefault, type App } from 'firebase-admin/app'
 import { getFirestore, type Firestore } from 'firebase-admin/firestore'
 import { getStorage } from 'firebase-admin/storage'
@@ -16,6 +17,7 @@ type Bucket = ReturnType<ReturnType<typeof getStorage>['bucket']>
  */
 
 const DEFAULT_BUCKET = 'zentos-eeca4.firebasestorage.app'
+const LOCAL_KEY = path.join(process.cwd(), 'firebase-service-account.local.json')
 
 let app: App | null = null
 let initError: unknown = null
@@ -23,6 +25,7 @@ let initError: unknown = null
 /** Detecta si hay credenciales disponibles para firebase-admin. */
 export function hasFirebaseCredentials(): boolean {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) return true
+  if (existsSync(LOCAL_KEY)) return true
 
   const keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS
   if (keyFile && existsSync(keyFile)) return true
@@ -52,17 +55,22 @@ function getAdminApp(): App | null {
     const bucket = getStorageBucketName()
     const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
 
-    app = initializeApp(
-      serviceAccount
-        ? {
-            credential: cert(JSON.parse(serviceAccount.replace(/\\n/g, '\n'))),
-            storageBucket: bucket,
-          }
-        : {
-            credential: applicationDefault(),
-            storageBucket: bucket,
-          }
-    )
+    if (serviceAccount) {
+      app = initializeApp({
+        credential: cert(JSON.parse(serviceAccount.replace(/\\n/g, '\n'))),
+        storageBucket: bucket,
+      })
+    } else if (existsSync(LOCAL_KEY)) {
+      app = initializeApp({
+        credential: cert(JSON.parse(readFileSync(LOCAL_KEY, 'utf8'))),
+        storageBucket: bucket,
+      })
+    } else {
+      app = initializeApp({
+        credential: applicationDefault(),
+        storageBucket: bucket,
+      })
+    }
     return app
   } catch (err) {
     initError = err
