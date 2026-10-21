@@ -18,5 +18,6 @@ export const firebaseConfig = {
 /** Colecciones de Firestore usadas por el sitio. */
 export const COLLECTIONS = {
   posts: 'posts',
+  drafts: 'drafts',
   leads: 'leads',
 } as const

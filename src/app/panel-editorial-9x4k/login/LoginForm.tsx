@@ -21,14 +21,17 @@ export default function LoginForm() {
     setLoading(true)
     setError('')
 
-    // La passphrase se valida en el navegador; el permiso real de escritura
-    // en Firestore lo aplican las reglas de seguridad.
-    if (adminLogin(password)) {
-      router.replace(`${ADMIN_BASE}/blog`)
-      return
+    // La clave se valida contra Firestore: las reglas solo aceptan la escritura
+    // de prueba si coincide con config/admin.key. Es el permiso real de escritura.
+    try {
+      if (await adminLogin(password)) {
+        router.replace(`${ADMIN_BASE}/blog`)
+        return
+      }
+      setError('Contraseña incorrecta.')
+    } catch {
+      setError('No se pudo conectar con Firestore. Revisa tu conexión.')
     }
-
-    setError('Contraseña incorrecta.')
     setLoading(false)
   }
 
@@ -73,8 +76,7 @@ export default function LoginForm() {
           type="submit"
           disabled={loading}
           className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {loading ? (
+        >          {loading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
               Verificando...

@@ -3,37 +3,73 @@ rules_version = '2';
 // Reglas de seguridad de zentos-web (Firebase Hosting estático + Firestore).
 //
 // El panel del admin escribe DIRECTAMENTE a Firestore desde el navegador, así
-// que estas reglas son la única barrera real. Deben permitir exactamente lo
-// mínimo:
+// que estas reglas son la única barrera real.
 //
-//   posts  → lectura pública (solo publicados) · escritura SIN permitir
-//   leads  → solo creación (formulario) · lectura cerrada
+// El proyecto está en plan Spark: Firebase Auth exige facturación
+// (`BILLING_NOT_ENABLED: Identity Platform feature requires billing`), así que
+// las escrituras del panel se autorizan con una clave de administración que vive
+// en `config/admin.key`. El cliente NUNCA puede leer ese documento (las reglas
+// solo lo leen con get()), y cada escritura del panel viaja con el campo
+// `adminKey`. Sin la clave correcta, toda escritura se rechaza.
 //
-// NOTA: mientras el proyecto esté en plan Spark no hay Firebase Auth, por lo
-// que la escritura de `posts` se controla con el token de administración
-// definido en cada despliegue (ver scripts/set-admin-claim.mjs).
+// Modelo de datos:
+//   posts   → solo artículos PUBLICADOS (lectura pública, escritura con clave)
+//   drafts  → borradores y artículos eliminados (nadie puede leerlos)
+//   leads   → solo creación desde el formulario
+//   config  → clave del panel (nadie la puede leer ni escribir desde cliente)
+//
+// El panel lee los borradores desde `drafts` y, al publicar, escribe el
+// documento en `posts`. Como un visitante no puede leer `drafts`, un artículo
+// sin publicar nunca es visible desde el navegador.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // --- Blog -----------------------------------------------------------------
-    // Lectura pública solo de artículos publicados y bien formados.
-    // La escritura la hace el admin desde el navegador; el sitio público nunca
-    // escribe `posts`, por lo que aquí no se permite `allow write` para nadie
-    // que no sea el propio admin identificado.
-    match /posts/{slug} {
-      allow read: if resource == null
-                  || (resource.data.draft == false && resource.data.title is string);
+    // --- Configuración interna ------------------------------------------------
+    // `config/admin` guarda la clave del panel: nadie puede leerlo ni escribirlo
+    // desde el cliente (las reglas lo consultan con get()).
+    match /config/{docId} {
+      allow read: if false;
+      allow write: if false;
+    }
 
-      // El panel del admin sube un header con el token configurado en el
-      // despliegue. Sin ese token, toda escritura se rechaza.
-      allow create, update, delete: if request.auth != null
-                                      && request.auth.token.admin == true;
+    // Documento de verificación del login: se puede escribir solo si la clave
+    // enviada coincide con la de `config/admin`. Es un get() interno: el cliente
+    // nunca ve la clave guardada.
+    match /config-verify/{docId} {
+      allow write: if request.resource.data.adminKey
+                     == get(/databases/$(database)/documents/config/admin).data.key;
+      allow read: if false;
+    }
+
+    function adminKey() {
+      return get(/databases/$(database)/documents/config/admin).data.key;
+    }
+
+    function isAdminRequest() {
+      return request.auth != null
+             ? request.auth.token.admin == true
+             : request.resource.data.adminKey == adminKey();
+    }
+
+    // --- Blog publicado -------------------------------------------------------
+    // Lectura pública del blog. La escritura la hace el panel con `adminKey`.
+    match /posts/{slug} {
+      allow read: if true;
+      allow create, update, delete: if isAdminRequest()
+                                      && request.resource.data.adminKey is string;
+    }
+
+    // --- Borradores (privados) ------------------------------------------------
+    // Nunca se leen desde el cliente: `request.auth == null` siempre en Spark,
+    // así que un visitante no puede verlos ni adivinando el slug.
+    match /drafts/{slug} {
+      allow read: if false;
+      allow create, update, delete: if isAdminRequest()
+                                      && request.resource.data.adminKey is string;
     }
 
     // --- Leads del formulario de contacto ------------------------------------
-    // Cualquiera puede crear un lead (con campos acotados), nadie puede leerlos
-    // ni modificarlos desde el navegador. Se revisan en la consola de Firebase.
     match /leads/{leadId} {
       allow create: if request.resource.data.keys().hasOnly([
                       'name', 'email', 'phone', 'message', 'createdAt', 'source'

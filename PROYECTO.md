@@ -216,10 +216,10 @@ Firestore como base de datos. Igual que los otros sitios de la agencia.
 |---|---|
 | Blog público | Prerenderizado en el build leyendo Firestore (Admin SDK) → SEO perfecto |
 | Admin (CRUD) | SDK web de Firestore desde el navegador, sin servidor |
-| Login del admin | Passphrase en el navegador (`NEXT_PUBLIC_ADMIN_SECRET_PHRASE`) |
+| Login del admin | Passphrase validada contra Firestore (reglas); se guarda en localStorage |
 | Seguridad real | Reglas de Firestore (`firestore.rules`): escritura anónima bloqueada |
 | Formulario de contacto | `addDoc` a `leads` desde el navegador (permitido por reglas) |
-| Imágenes | Unsplash (búsqueda en el navegador) o URL directa; Storage disponible al activarlo |
+| Imágenes | Unsplash (búsqueda en el navegador) o URL directa; Storage al activarlo |
 
 ### Deploy
 
@@ -229,8 +229,37 @@ npm run deploy:hosting  # solo hosting (sin tocar reglas)
 ```
 
 * URL: https://zentos-eeca4.web.app
-* Panel: `/panel-editorial-9x4k` (el path está hardcodeado en `firebase.json`)
-* `/admin/*` está bloqueado con rewrite a `/404.html`
+* Panel: **`/panel-editorial-9x4k/login/`** — la carpeta
+  `src/app/panel-editorial-9x4k/` ES la ruta (no hay middleware en export estático)
+* `/admin/*` no existe: `firebase.json` lo reescribe a `/404.html`
+* Para cambiar el path: renombra la carpeta en `src/app/` y el bloque de
+  `/admin/**` en `firebase.json`
+
+### Seguridad del panel (plan Spark, sin billing)
+
+Firebase Auth exige facturación
+(`400 BILLING_NOT_ENABLED: Identity Platform feature requires billing`), así que
+las escrituras se autorizan con una **clave de administración**:
+
+1. `config/admin.key` guarda la clave. Las reglas **no dejan** leerla ni
+   escribirla desde el cliente; solo la consultan con `get()`.
+2. Cada escritura del panel viaja con el campo `adminKey`; la regla lo compara
+   contra `config/admin.key`. Sin coincidencia → `permission-denied`.
+3. El login escribe `config-verify/login` para validar la passphrase: si es
+   incorrecta, las reglas rechazan la escritura.
+
+Modelo de colecciones:
+
+| Colección | Lectura | Escritura |
+|---|---|---|
+| `posts` | pública (blog publicado) | solo con `adminKey` |
+| `drafts` | **nadie** (borradores y eliminados) | solo con `adminKey` |
+| `leads` | nadie | cualquiera **crea** (formulario) |
+| `config` / `config-verify` | nadie | `config` nadie · `config-verify` con clave |
+
+Un artículo sin publicar vive en `drafts`, así que un visitante **no puede
+leerlo ni adivinando el slug**. Al publicar, el documento se escribe en `posts`
+y se limpia `drafts`.
 
 ### Importante: sitio estático
 
@@ -238,16 +267,16 @@ Un post nuevo/editado queda **guardado en Firestore al instante**, pero su
 página pública no existe hasta reconstruir. El panel avisa con una etiqueta
 "Sin publicar" y un banner. Flujo normal del admin:
 
-1. Crear/editar el artículo en `/panel-editorial-9x4k` → se guarda en Firestore
+1. Crear/editar el artículo en `/panel-editorial-9x4k/blog/` → se guarda en Firestore
 2. Ejecutar `npm run deploy` → el sitio se regenera con el contenido nuevo
 
 ### Datos
 
 * Proyecto Firebase: `zentos-eeca4` (`776367388112`)
 * Firestore: región `southamerica-west1` (Santiago), modo nativo
-* Colecciones: `posts` (7 documentos, id = slug) y `leads`
+* Colecciones: `posts` (7 artículos), `drafts`, `leads`, `config`
 * Service account local: `firebase-service-account.local.json` (gitignored),
-  la usan el build y `scripts/firebase-import.mjs`
+  la usan el build y `scripts/blog-admin.mjs`
 
 ### Pendientes
 
@@ -255,21 +284,24 @@ página pública no existe hasta reconstruir. El panel avisa con una etiqueta
   facturación (la API de GCS responde `403 billing account ... absent`).
   Sin bucket, el admin usa Unsplash/URL para las portadas. Para activarlo:
   Firebase Console → Storage → *Get started* (o plan Blaze).
-* **Firebase Auth**: también exige facturación
-  (`400 BILLING_NOT_ENABLED: Identity Platform feature requires billing`),
-  por eso el login del admin es una passphrase en el navegador.
+* **Firebase Auth**: también exige facturación, por eso el login del panel es
+  una passphrase (ver arriba).
 * **Con billing** se podría ir a App Hosting y recuperar el panel con Auth,
-  ISR y subida de imágenes vía sharp.
+  ISR y subida de imágenes vía sharp (y quitar la clave `adminKey`).
 
 ### Notas del refactor
 
 * `src/lib/post-format.ts` — parseo puro (sin servidor ni navegador)
 * `src/lib/blog.ts` — capa de datos: navegador (SDK web) → build (Admin SDK) → `.md`
-* `src/lib/firebase/{client,data,blog-admin,config}.ts` — SDK web, CRUD del admin,
-  lectura con Admin SDK y configuración pública
+* `scripts/blog-admin.mjs` — lector con Admin SDK para el build. Vive fuera de
+  `src/` porque es un `.mjs` de Node: `blog.ts` lo importa por ruta absoluta con
+  `webpackIgnore`, así `firebase-admin` nunca entra al bundle del navegador.
+* `src/lib/firebase/{client,data,config}.ts` — SDK web, CRUD del admin y
+  configuración pública
 * `src/lib/pending-changes.ts` — aviso de cambios sin publicar (localStorage)
 * Los `import()` de `firebase-admin` y `fs` usan `webpackIgnore` para no entrar
   al bundle del navegador (si se rompe, el build falla con "Can't resolve 'net'").
+
 
 
 | Antes (filesystem) | Ahora (Firebase) |

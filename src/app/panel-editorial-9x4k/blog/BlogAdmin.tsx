@@ -104,7 +104,6 @@ export default function BlogAdmin({ initialPosts }: { initialPosts: PostMeta[] }
     setPosts(list.map(({ html, ...meta }) => meta))
     setPending(getPendingChanges())
   }
-
   const startCreate = () => {
     setMessage(null)
     setEditor(emptyEditor())

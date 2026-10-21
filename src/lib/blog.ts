@@ -28,6 +28,12 @@ export type PostInput = PostMeta & { content: string }
 
 const isBrowser = typeof window !== 'undefined'
 
+/** Combina los posts publicados con sus borradores (el borrador gana). */
+export function mergePublishedWithDrafts(published: Post[], drafts: Post[]): Post[] {
+  const draftSlugs = new Set(drafts.map((d) => d.slug))
+  return [...published.filter((p) => !draftSlugs.has(p.slug)), ...drafts]
+}
+
 // ---------------------------------------------------------------------------
 // Fuentes de datos
 // ---------------------------------------------------------------------------
@@ -39,9 +45,24 @@ async function readFromClient(includeDrafts: boolean): Promise<Post[] | null> {
     const db = getClientDb()
     if (!db) return null
 
-    const snapshot = await getDocs(collection(db, 'posts'))
-    const posts = snapshot.docs.map((doc) => buildPostFromData(doc.id, doc.data()))
-    return sortPosts(includeDrafts ? posts : posts.filter((p) => !p.draft))
+    // `posts` es público; `drafts` solo se puede leer siendo admin (las reglas
+    // lo bloquean para visitantes, así que la lectura falla y se ignora).
+    const published = (await getDocs(collection(db, 'posts'))).docs
+      .map((doc) => buildPostFromData(doc.id, doc.data()))
+      .filter((p) => Boolean(p.title) && !p.draft)
+
+    if (!includeDrafts) return sortPosts(published)
+
+    let drafts: Post[] = []
+    try {
+      drafts = (await getDocs(collection(db, 'drafts'))).docs.map((doc) =>
+        buildPostFromData(doc.id, { ...doc.data(), draft: true })
+      )
+    } catch {
+      // Visitante sin clave admin: no puede leer borradores (correcto).
+    }
+
+    return sortPosts(mergePublishedWithDrafts(published, drafts))
   } catch (err) {
     console.error('[blog] lectura desde Firestore (web) falló:', err)
     return null
@@ -50,11 +71,24 @@ async function readFromClient(includeDrafts: boolean): Promise<Post[] | null> {
 
 async function readFromAdmin(includeDrafts: boolean): Promise<Post[] | null> {
   try {
-    // Import dinámico "opaco" para webpack: evita que firebase-admin entre al
-    // bundle del navegador (este camino solo se ejecuta en el build).
+    // El lector con Admin SDK vive en un `.mjs` de Node (scripts/): así no
+    // depende de la resolución de módulos de webpack ni del alias "@/...".
+    // webpackIgnore evita que webpack intente empaquetarlo en el navegador.
     const load = (m: string) => import(/* webpackIgnore: true */ m)
-    const mod = (await load('@/lib/firebase/blog-admin')) as typeof import('@/lib/firebase/blog-admin')
-    return await mod.getAllPostsFromAdmin(includeDrafts)
+    const url = (await load('node:url')) as typeof import('url')
+    const pathMod = (await load('node:path')) as typeof import('path')
+    const file = url.pathToFileURL(
+      pathMod.join(process.cwd(), 'scripts', 'blog-admin.mjs')
+    ).href
+
+    const mod = (await load(file)) as {
+      getAllPostsFromAdmin: (
+        drafts: boolean
+      ) => Promise<Array<{ slug: string; data: Record<string, unknown> }>>
+    }
+    const records = await mod.getAllPostsFromAdmin(includeDrafts)
+    const posts = records.map((r) => buildPostFromData(r.slug, r.data))
+    return sortPosts(posts)
   } catch (err) {
     console.error('[blog] lectura con el Admin SDK falló:', err)
     return null
@@ -142,15 +176,27 @@ export async function getPostIncludingDrafts(
       const { doc, getDoc } = await import('firebase/firestore')
       const db = getClientDb()
       if (db) {
+        // Un borrador vive en `drafts`; el admin puede leer ambas colecciones.
+        const draftSnap = await getDoc(doc(db, 'drafts', slug)).catch(() => null)
+        if (draftSnap?.exists()) return withContent(draftSnap.data(), draftSnap.id)
+
         const snap = await getDoc(doc(db, 'posts', slug))
-        if (snap.exists()) return withContent(snap.data(), snap.id)
+        if (snap.exists() && snap.data().title) return withContent(snap.data(), snap.id)
       }
     } else {
       const load = (m: string) => import(/* webpackIgnore: true */ m)
-      const mod = (await load(
-        '@/lib/firebase/blog-admin'
-      )) as typeof import('@/lib/firebase/blog-admin')
-      return (await mod.getPostFromAdmin(slug)) as (Post & { content: string }) | null
+      const url = (await load('node:url')) as typeof import('url')
+      const pathMod = (await load('node:path')) as typeof import('path')
+      const file = url.pathToFileURL(
+        pathMod.join(process.cwd(), 'scripts', 'blog-admin.mjs')
+      ).href
+      const mod = (await load(file)) as {
+        getPostFromAdmin: (
+          slug: string
+        ) => Promise<{ slug: string; data: Record<string, unknown> } | null>
+      }
+      const record = await mod.getPostFromAdmin(slug)
+      return record ? withContent(record.data, record.slug) : null
     }
   } catch (err) {
     console.error('[blog] no se pudo leer el post:', err)
