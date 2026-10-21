@@ -1,25 +1,14 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-const DEFAULT_SECRET = '/panel-editorial-9x4k'
-
-function getSecretPath(): string {
-  return process.env.ADMIN_SECRET_PATH || DEFAULT_SECRET
-}
+const SECRET_PATH = process.env.ADMIN_SECRET_PATH || '/panel-editorial-9x4k'
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
-  const secret = getSecretPath()
 
-  // Bloquear acceso directo a /admin (páginas) — 404 real
-  // Las APIs /api/admin/* NO se bloquean aquí: ya tienen auth en cada ruta
-  if (pathname.startsWith('/admin')) {
-    return new NextResponse(null, { status: 404 })
-  }
-
-  // Path secreto → reescribir a /admin/* (páginas)
-  if (pathname === secret || pathname.startsWith(`${secret}/`)) {
-    const remainder = pathname.slice(secret.length) || '/'
+  // Path secreto → /admin/* (el rewrite es interno: la URL no cambia)
+  if (pathname === SECRET_PATH || pathname.startsWith(`${SECRET_PATH}/`)) {
+    const remainder = pathname.slice(SECRET_PATH.length) || '/'
     const url = request.nextUrl.clone()
     url.pathname = `/admin${remainder}`
     return NextResponse.rewrite(url)
@@ -29,5 +18,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/panel-editorial-9x4k/:path*'],
+  matcher: ['/panel-editorial-9x4k/:path*'],
 }

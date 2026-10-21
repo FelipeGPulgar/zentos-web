@@ -1,0 +1,57 @@
+rules_version = '2';
+
+// Reglas de seguridad de zentos-web (Firebase Hosting estático + Firestore).
+//
+// El panel del admin escribe DIRECTAMENTE a Firestore desde el navegador, así
+// que estas reglas son la única barrera real. Deben permitir exactamente lo
+// mínimo:
+//
+//   posts  → lectura pública (solo publicados) · escritura SIN permitir
+//   leads  → solo creación (formulario) · lectura cerrada
+//
+// NOTA: mientras el proyecto esté en plan Spark no hay Firebase Auth, por lo
+// que la escritura de `posts` se controla con el token de administración
+// definido en cada despliegue (ver scripts/set-admin-claim.mjs).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Blog -----------------------------------------------------------------
+    // Lectura pública solo de artículos publicados y bien formados.
+    // La escritura la hace el admin desde el navegador; el sitio público nunca
+    // escribe `posts`, por lo que aquí no se permite `allow write` para nadie
+    // que no sea el propio admin identificado.
+    match /posts/{slug} {
+      allow read: if resource == null
+                  || (resource.data.draft == false && resource.data.title is string);
+
+      // El panel del admin sube un header con el token configurado en el
+      // despliegue. Sin ese token, toda escritura se rechaza.
+      allow create, update, delete: if request.auth != null
+                                      && request.auth.token.admin == true;
+    }
+
+    // --- Leads del formulario de contacto ------------------------------------
+    // Cualquiera puede crear un lead (con campos acotados), nadie puede leerlos
+    // ni modificarlos desde el navegador. Se revisan en la consola de Firebase.
+    match /leads/{leadId} {
+      allow create: if request.resource.data.keys().hasOnly([
+                      'name', 'email', 'phone', 'message', 'createdAt', 'source'
+                    ])
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() < 120
+                    && request.resource.data.email is string
+                    && request.resource.data.email.size() < 260
+                    && request.resource.data.message is string
+                    && request.resource.data.message.size() > 9
+                    && request.resource.data.message.size() < 1300;
+
+      allow read, update, delete: if false;
+    }
+
+    // Todo lo demás queda cerrado por defecto.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

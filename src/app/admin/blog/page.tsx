@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import { getAllPosts } from '@/lib/blog'
 import BlogAdmin from './BlogAdmin'
 
 export const metadata: Metadata = {
@@ -7,9 +6,7 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 }
 
-export default async function AdminBlogPage() {
-  const posts = await getAllPosts({ includeDrafts: true })
-  const initialPosts = posts.map(({ html, ...meta }) => meta)
-
-  return <BlogAdmin initialPosts={initialPosts} />
+// El panel es client-side: la lista real llega desde Firestore en el navegador.
+export default function AdminBlogPage() {
+  return <BlogAdmin initialPosts={[]} />
 }

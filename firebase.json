@@ -1,0 +1,49 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "hosting": {
+    "public": "out",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "cleanUrls": true,
+    "trailingSlash": true,
+    "rewrites": [
+      {
+        "source": "/panel-editorial-9x4k",
+        "destination": "/admin/login/index.html"
+      },
+      {
+        "source": "/panel-editorial-9x4k/login",
+        "destination": "/admin/login/index.html"
+      },
+      {
+        "source": "/panel-editorial-9x4k/login/**",
+        "destination": "/admin/login/index.html"
+      },
+      {
+        "source": "/panel-editorial-9x4k/blog/**",
+        "destination": "/admin/blog/index.html"
+      },
+      {
+        "source": "/panel-editorial-9x4k/**",
+        "destination": "/admin/blog/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(jpg|jpeg|gif|png|webp|svg|ico|woff|woff2)",
+        "headers": [{ "key": "Cache-Control", "value": "max-age=604800" }]
+      },
+      {
+        "source": "/_next/static/**",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      },
+      {
+        "source": "/admin/**",
+        "headers": [
+          { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+        ]
+      }
+    ]
+  }
+}

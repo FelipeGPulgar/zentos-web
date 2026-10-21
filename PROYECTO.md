@@ -205,26 +205,72 @@ node scripts/firebase-import.mjs [--overwrite]
 
 ## Migración a Firebase (backend de esta web)
 
-**Estado** (20-oct-2026): backend operativo ✅
+**Estado** (20-oct-2026): ✅ **PUBLICADO en https://zentos-eeca4.web.app**
 
-- Proyecto Firebase: `zentos-eeca4` (número `776367388112`).
-- **Firestore creado y en uso** — región `southamerica-west1` (Santiago),
-  modo `FIRESTORE_NATIVE`. 7 posts importados (id = slug).
-- APIs habilitadas: `firestore`, `storage`, `firebaserules`, `iam`.
-- Service account key local: `firebase-service-account.local.json`
-  (gitignored) generada con `node scripts/firebase-setup.mjs --sa-key`.
-  `src/lib/firebase/server.ts` la detecta automáticamente en local.
-- Verificado end-to-end: post creado solo en Firestore aparece en `/blog`,
-  login admin OK y `/api/admin/posts` lee Firestore.
-- **Pendiente — Storage**: no se pudo crear el bucket por API porque el
-  proyecto no tiene cuenta de facturación (`403 billing account ... absent`).
-  Solución: Firebase Console → Storage → *Get started* (o activar Blaze).
-  Mientras tanto las subidas del admin caen al filesystem (`public/blog/`).
-- **Pendiente — Hosting**: App Hosting requiere plan Blaze + cuenta de
-  facturación, y `zentos-eeca4` no tiene ninguna. Alternativas:
-  (a) agregar cuenta de facturación y desplegar en App Hosting (ADC automático),
-  (b) desplegar el frontend en Netlify/Amplify definiendo `FIREBASE_SERVICE_ACCOUNT`
-  (JSON de la key) como variable de entorno.
+Sitio **100% estático** en Firebase Hosting (plan Spark, sin tarjeta) con
+Firestore como base de datos. Igual que los otros sitios de la agencia.
+
+### Arquitectura
+
+| Pieza | Cómo funciona |
+|---|---|
+| Blog público | Prerenderizado en el build leyendo Firestore (Admin SDK) → SEO perfecto |
+| Admin (CRUD) | SDK web de Firestore desde el navegador, sin servidor |
+| Login del admin | Passphrase en el navegador (`NEXT_PUBLIC_ADMIN_SECRET_PHRASE`) |
+| Seguridad real | Reglas de Firestore (`firestore.rules`): escritura anónima bloqueada |
+| Formulario de contacto | `addDoc` a `leads` desde el navegador (permitido por reglas) |
+| Imágenes | Unsplash (búsqueda en el navegador) o URL directa; Storage disponible al activarlo |
+
+### Deploy
+
+```bash
+npm run deploy          # build + hosting + reglas de Firestore
+npm run deploy:hosting  # solo hosting (sin tocar reglas)
+```
+
+* URL: https://zentos-eeca4.web.app
+* Panel: `/panel-editorial-9x4k` (el path está hardcodeado en `firebase.json`)
+* `/admin/*` está bloqueado con rewrite a `/404.html`
+
+### Importante: sitio estático
+
+Un post nuevo/editado queda **guardado en Firestore al instante**, pero su
+página pública no existe hasta reconstruir. El panel avisa con una etiqueta
+"Sin publicar" y un banner. Flujo normal del admin:
+
+1. Crear/editar el artículo en `/panel-editorial-9x4k` → se guarda en Firestore
+2. Ejecutar `npm run deploy` → el sitio se regenera con el contenido nuevo
+
+### Datos
+
+* Proyecto Firebase: `zentos-eeca4` (`776367388112`)
+* Firestore: región `southamerica-west1` (Santiago), modo nativo
+* Colecciones: `posts` (7 documentos, id = slug) y `leads`
+* Service account local: `firebase-service-account.local.json` (gitignored),
+  la usan el build y `scripts/firebase-import.mjs`
+
+### Pendientes
+
+* **Storage**: el bucket sigue sin crearse porque el proyecto no tiene
+  facturación (la API de GCS responde `403 billing account ... absent`).
+  Sin bucket, el admin usa Unsplash/URL para las portadas. Para activarlo:
+  Firebase Console → Storage → *Get started* (o plan Blaze).
+* **Firebase Auth**: también exige facturación
+  (`400 BILLING_NOT_ENABLED: Identity Platform feature requires billing`),
+  por eso el login del admin es una passphrase en el navegador.
+* **Con billing** se podría ir a App Hosting y recuperar el panel con Auth,
+  ISR y subida de imágenes vía sharp.
+
+### Notas del refactor
+
+* `src/lib/post-format.ts` — parseo puro (sin servidor ni navegador)
+* `src/lib/blog.ts` — capa de datos: navegador (SDK web) → build (Admin SDK) → `.md`
+* `src/lib/firebase/{client,data,blog-admin,config}.ts` — SDK web, CRUD del admin,
+  lectura con Admin SDK y configuración pública
+* `src/lib/pending-changes.ts` — aviso de cambios sin publicar (localStorage)
+* Los `import()` de `firebase-admin` y `fs` usan `webpackIgnore` para no entrar
+  al bundle del navegador (si se rompe, el build falla con "Can't resolve 'net'").
+
 
 | Antes (filesystem) | Ahora (Firebase) |
 |---|---|

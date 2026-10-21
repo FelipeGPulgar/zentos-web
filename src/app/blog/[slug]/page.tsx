@@ -5,7 +5,7 @@ import { ArrowLeft, Calendar, Clock, Tag, ArrowRight, MessageCircle } from 'luci
 import { getAllPosts, getPost, formatDate } from '@/lib/blog'
 import { siteConfig } from '@/lib/site'
 
-export const revalidate = 3600
+export const dynamic = 'force-static'
 
 type Props = { params: { slug: string } }
 

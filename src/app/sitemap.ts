@@ -2,7 +2,7 @@ import type { MetadataRoute } from 'next'
 import { siteConfig } from '@/lib/site'
 import { getAllPosts } from '@/lib/blog'
 
-export const revalidate = 3600
+export const dynamic = 'force-static'
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const routes = ['', '/proyectos', '/blog', '/contacto', '/privacidad', '/terminos']

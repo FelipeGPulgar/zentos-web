@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "deploy": "next build && firebase deploy --only hosting,firestore:rules --project zentos-eeca4",
+    "deploy:hosting": "next build && firebase deploy --only hosting --project zentos-eeca4",
+    "import:posts": "node scripts/firebase-import.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

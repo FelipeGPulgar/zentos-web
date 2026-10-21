@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Lock, Loader2, AlertCircle } from 'lucide-react'
 import { ADMIN_BASE } from '@/lib/admin-client'
+import { adminLogin, isAdminLoggedIn } from '@/lib/firebase/data'
 
 export default function LoginForm() {
   const [password, setPassword] = useState('')
@@ -11,27 +12,24 @@ export default function LoginForm() {
   const [loading, setLoading] = useState(false)
   const router = useRouter()
 
+  useEffect(() => {
+    if (isAdminLoggedIn()) router.replace(`${ADMIN_BASE}/blog`)
+  }, [router])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError('')
 
-    try {
-      const res = await fetch('/api/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      })
-      const data = await res.json()
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || 'Error al iniciar sesión.')
-      }
-      router.push(`${ADMIN_BASE}/blog`)
-      router.refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error de conexión.')
-      setLoading(false)
+    // La passphrase se valida en el navegador; el permiso real de escritura
+    // en Firestore lo aplican las reglas de seguridad.
+    if (adminLogin(password)) {
+      router.replace(`${ADMIN_BASE}/blog`)
+      return
     }
+
+    setError('Contraseña incorrecta.')
+    setLoading(false)
   }
 
   return (

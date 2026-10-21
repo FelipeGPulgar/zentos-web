@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus,
@@ -16,9 +16,13 @@ import {
   Eye,
   EyeOff,
   Star,
+  RefreshCw,
 } from 'lucide-react'
 import ImagePicker from '@/components/ImagePicker'
 import { ADMIN_BASE } from '@/lib/admin-client'
+import { getAllPosts } from '@/lib/blog'
+import { getPendingChanges, clearPendingChanges } from '@/lib/pending-changes'
+import { isAdminLoggedIn, adminLogout, removePost, savePost } from '@/lib/firebase/data'
 
 type PostMeta = {
   slug: string
@@ -77,20 +81,28 @@ export default function BlogAdmin({ initialPosts }: { initialPosts: PostMeta[] }
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [message, setMessage] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [pending, setPending] = useState<Record<string, 'create' | 'update' | 'delete'>>({})
+  const [checking, setChecking] = useState(true)
   const router = useRouter()
+
+  // El panel es una página estática: si no hay sesión local, fuera.
+  useEffect(() => {
+    if (!isAdminLoggedIn()) {
+      router.replace(`${ADMIN_BASE}/login`)
+      return
+    }
+    setChecking(false)
+    setPending(getPendingChanges())
+  }, [router])
 
   const update = <K extends keyof EditorState>(key: K, value: EditorState[K]) => {
     setEditor((prev) => (prev ? { ...prev, [key]: value } : prev))
   }
 
   const fetchPosts = async () => {
-    const res = await fetch('/api/admin/posts')
-    if (res.status === 401) {
-      router.push(`${ADMIN_BASE}/login`)
-      return
-    }
-    const data = await res.json()
-    if (data.ok) setPosts(data.posts)
+    const list = await getAllPosts({ includeDrafts: true })
+    setPosts(list.map(({ html, ...meta }) => meta))
+    setPending(getPendingChanges())
   }
 
   const startCreate = () => {
@@ -105,9 +117,9 @@ export default function BlogAdmin({ initialPosts }: { initialPosts: PostMeta[] }
 
     let content = ''
     try {
-      const res = await fetch(`/api/admin/posts/raw/${slug}`)
-      const data = await res.json()
-      if (data.ok) content = data.content
+      const { getPostIncludingDrafts } = await import('@/lib/blog')
+      const full = await getPostIncludingDrafts(slug)
+      if (full) content = full.content
     } catch {
       // si falla, se edita solo la metadata
     }
@@ -132,35 +144,34 @@ export default function BlogAdmin({ initialPosts }: { initialPosts: PostMeta[] }
     setSaving(true)
     setMessage(null)
 
-    const payload = {
-      title: editor.title,
-      description: editor.description,
-      slug: editor.slug || slugify(editor.title),
-      date: editor.date,
-      category: editor.category,
-      tags: editor.tags,
-      cover: editor.cover,
-      featured: editor.featured,
-      draft: editor.draft,
-      content: editor.content,
-    }
+    const slug = editor.slug || slugify(editor.title)
 
     try {
-      const res = await fetch(
-        editor.mode === 'create' ? '/api/admin/posts' : `/api/admin/posts/${editor.slug}`,
+      await savePost(
         {
-          method: editor.mode === 'create' ? 'POST' : 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        }
+          slug,
+          title: editor.title,
+          description: editor.description,
+          date: editor.date,
+          category: editor.category,
+          tags: editor.tags
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean),
+          cover: editor.cover,
+          featured: editor.featured,
+          draft: editor.draft,
+          content: editor.content,
+        },
+        editor.mode === 'edit' ? editor.slug : undefined
       )
-      const data = await res.json()
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Error al guardar.')
 
-      setMessage({ type: 'ok', text: 'Artículo guardado.' })
+      setMessage({
+        type: 'ok',
+        text: 'Guardado en Firestore. Para que el artículo sea público hay que reconstruir el sitio.',
+      })
       setEditor(null)
       await fetchPosts()
-      router.refresh()
     } catch (err) {
       setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Error de conexión.' })
     } finally {
@@ -173,22 +184,28 @@ export default function BlogAdmin({ initialPosts }: { initialPosts: PostMeta[] }
     setMessage(null)
 
     try {
-      const res = await fetch(`/api/admin/posts/${slug}`, { method: 'DELETE' })
-      const data = await res.json()
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Error al eliminar.')
-
-      setMessage({ type: 'ok', text: 'Artículo eliminado.' })
+      await removePost(slug)
+      setMessage({
+        type: 'ok',
+        text: 'Eliminado de Firestore. La página pública desaparece al reconstruir.',
+      })
       await fetchPosts()
-      router.refresh()
     } catch (err) {
       setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Error de conexión.' })
     }
   }
 
-  const logout = async () => {
-    await fetch('/api/admin/logout', { method: 'POST' })
-      router.push(`${ADMIN_BASE}/login`)
-    router.refresh()
+  const logout = () => {
+    adminLogout()
+    router.replace(`${ADMIN_BASE}/login`)
+  }
+
+  if (checking) {
+    return (
+      <section className="flex min-h-[50vh] items-center justify-center py-20">
+        <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+      </section>
+    )
   }
 
   return (
@@ -204,16 +221,36 @@ export default function BlogAdmin({ initialPosts }: { initialPosts: PostMeta[] }
               <Plus className="h-4 w-4" />
               Nuevo artículo
             </button>
-            <button
-              onClick={logout}
-              className="btn-secondary !py-2.5"
-              aria-label="Cerrar sesión"
-            >
+            <button onClick={logout} className="btn-secondary !py-2.5" aria-label="Cerrar sesión">
               <LogOut className="h-4 w-4" />
               Salir
             </button>
           </div>
         </div>
+
+        {Object.keys(pending).length > 0 && (
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
+            <RefreshCw className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-medium">
+                Hay {Object.keys(pending).length} cambio(s) guardados que aún no son públicos.
+              </p>
+              <p className="mt-1 text-yellow-200/80">
+                Este sitio es estático: ejecuta <code>npm run deploy</code> para regenerar las
+                páginas y publicar los cambios.
+              </p>
+              <button
+                onClick={() => {
+                  clearPendingChanges()
+                  setPending({})
+                }}
+                className="mt-2 text-xs underline hover:no-underline"
+              >
+                Ya lo publiqué, limpiar aviso
+              </button>
+            </div>
+          </div>
+        )}
 
         {message && (
           <div
@@ -340,7 +377,10 @@ export default function BlogAdmin({ initialPosts }: { initialPosts: PostMeta[] }
                 <label className="mb-2 block text-sm font-medium text-zinc-300">
                   Imagen de portada (opcional)
                 </label>
-                <ImagePicker value={editor.cover} onValueChange={(v) => update('cover', typeof v === 'string' ? v : '')} />
+                <ImagePicker
+                  value={editor.cover}
+                  onValueChange={(v) => update('cover', typeof v === 'string' ? v : '')}
+                />
               </div>
 
               <div className="flex flex-wrap gap-6 sm:col-span-2">
@@ -409,10 +449,7 @@ export default function BlogAdmin({ initialPosts }: { initialPosts: PostMeta[] }
               </div>
             ) : (
               posts.map((post) => (
-                <div
-                  key={post.slug}
-                  className="card flex flex-wrap items-center gap-4 p-5"
-                >
+                <div key={post.slug} className="card flex flex-wrap items-center gap-4 p-5">
                   <div className="min-w-0 flex-1">
                     <div className="mb-1 flex flex-wrap items-center gap-2">
                       <h2 className="truncate text-sm font-semibold text-white">{post.title}</h2>
@@ -425,6 +462,12 @@ export default function BlogAdmin({ initialPosts }: { initialPosts: PostMeta[] }
                         <span className="flex items-center gap-1 rounded-full border border-accent-500/30 bg-accent-500/10 px-2 py-0.5 text-[11px] font-medium text-accent-300">
                           <Star className="h-3 w-3" />
                           Destacado
+                        </span>
+                      )}
+                      {pending[post.slug] && (
+                        <span className="flex items-center gap-1 rounded-full border border-orange-500/30 bg-orange-500/10 px-2 py-0.5 text-[11px] font-medium text-orange-300">
+                          <RefreshCw className="h-3 w-3" />
+                          Sin publicar
                         </span>
                       )}
                     </div>

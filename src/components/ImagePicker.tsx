@@ -2,7 +2,9 @@
 
 import { useState, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import { Search, Upload, X, Loader2, ImageIcon, ExternalLink } from 'lucide-react'
+import { Search, Upload, X, Loader2, ImageIcon, ExternalLink, Link2 } from 'lucide-react'
+import { getClientStorage } from '@/lib/firebase/client'
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 
 type SearchResult = {
   id: string
@@ -18,32 +20,59 @@ type Props = {
   onValueChange: Dispatch<SetStateAction<string>>
 }
 
+const UNSPLASH_KEY = process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY
+
 export default function ImagePicker({ value, onValueChange }: Props) {
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<'search' | 'upload'>('search')
+  const [tab, setTab] = useState<'search' | 'upload' | 'url'>('search')
   const [query, setQuery] = useState('')
+  const [urlInput, setUrlInput] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
+  /** Busca fotos directamente en la API pública de Unsplash (desde el navegador). */
   const search = async (page = 1) => {
     if (!query.trim()) return
     setLoading(true)
     setError('')
+
+    if (!UNSPLASH_KEY) {
+      setError(
+        'La búsqueda de Unsplash necesita NEXT_PUBLIC_UNSPLASH_ACCESS_KEY (puedes pegar una URL de imagen mientras tanto).'
+      )
+      setLoading(false)
+      return
+    }
+
     try {
-      const res = await fetch(`/api/admin/image-search?q=${encodeURIComponent(query)}&page=${page}`)
+      const res = await fetch(
+        `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=12&page=${page}`,
+        { headers: { Authorization: `Client-ID ${UNSPLASH_KEY}` } }
+      )
+      if (!res.ok) throw new Error('Unsplash no respondió. Intenta de nuevo.')
       const data = await res.json()
-      if (!res.ok || !data.ok) {
-        if (data.needsKey) {
-          setError(data.error)
-        } else {
-          throw new Error(data.error || 'Error al buscar.')
-        }
-        return
-      }
-      setResults(data.results)
+
+      setResults(
+        (data.results || []).map(
+          (r: {
+            id: string
+            urls: { small: string; regular: string }
+            alt_description?: string
+            user?: { name?: string }
+            links?: { html?: string }
+          }) => ({
+            id: r.id,
+            thumb: r.urls.small,
+            full: r.urls.regular,
+            alt: r.alt_description || query,
+            author: r.user?.name || '',
+            sourceUrl: r.links?.html || '',
+          })
+        )
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error de conexión.')
     } finally {
@@ -51,26 +80,42 @@ export default function ImagePicker({ value, onValueChange }: Props) {
     }
   }
 
+  /** Sube a Firebase Storage si hay bucket disponible; si no, guarda la URL de Unsplash. */
   const upload = async (file: File) => {
     setUploading(true)
     setError('')
     try {
-      const fd = new FormData()
-      fd.append('image', file)
-      const res = await fetch('/api/admin/upload', { method: 'POST', body: fd })
-      const data = await res.json()
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Error al subir.')
+      const storage = getClientStorage()
+      if (!storage) throw new Error('Storage no está disponible.')
 
-      onValueChange(data.url)
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+      const name = `blog/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+      const objectRef = ref(storage, name)
+      await uploadBytes(objectRef, file, { contentType: file.type || 'image/jpeg' })
+      const url = await getDownloadURL(objectRef)
+
+      onValueChange(url)
       setOpen(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error de conexión.')
+      const message = err instanceof Error ? err.message : 'Error al subir.'
+      setError(
+        /storage\/unauthorized|permission|402|403/i.test(message)
+          ? 'Storage todavía no está activado en el proyecto Firebase. Usa "Buscar (Unsplash)" o pega una URL mientras tanto.'
+          : message
+      )
     } finally {
       setUploading(false)
     }
   }
 
   const selectUnsplash = async (result: SearchResult) => {
+    // Sin Storage activo no podemos descargar y re-subir: usamos la URL directa.
+    if (!getClientStorage()) {
+      onValueChange(result.full)
+      setOpen(false)
+      return
+    }
+
     setUploading(true)
     setError('')
     try {
@@ -125,7 +170,7 @@ export default function ImagePicker({ value, onValueChange }: Props) {
 
       {open && (
         <div className="mt-3 rounded-xl border border-white/10 bg-space-900/80 p-4">
-          <div className="mb-4 flex gap-2">
+          <div className="mb-4 flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setTab('search')}
@@ -145,6 +190,16 @@ export default function ImagePicker({ value, onValueChange }: Props) {
             >
               <Upload className="mr-1 inline h-3.5 w-3.5" />
               Subir JPG/PNG
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('url')}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                tab === 'url' ? 'bg-accent-500/20 text-accent-300' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              <Link2 className="mr-1 inline h-3.5 w-3.5" />
+              Pegar URL
             </button>
           </div>
 
@@ -202,10 +257,10 @@ export default function ImagePicker({ value, onValueChange }: Props) {
                 >
                   Unsplash <ExternalLink className="h-3 w-3" />
                 </a>
-                . Al usar una foto se guarda localmente en WebP optimizado.
+                . Se enlazan directo desde su CDN.
               </p>
             </div>
-          ) : (
+          ) : tab === 'upload' ? (
             <div>
               <input
                 ref={fileRef}
@@ -227,7 +282,7 @@ export default function ImagePicker({ value, onValueChange }: Props) {
                 {uploading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Convirtiendo a WebP...
+                    Subiendo a Firebase Storage...
                   </>
                 ) : (
                   <>
@@ -237,9 +292,35 @@ export default function ImagePicker({ value, onValueChange }: Props) {
                 )}
               </button>
               <p className="mt-3 text-xs text-zinc-600">
-                Se convierte automáticamente a WebP optimizado (~80% menos peso).
+                Se sube a Firebase Storage del proyecto. Si Storage aún no está activado, usa
+                &laquo;Pegar URL&raquo;.
               </p>
               {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+            </div>
+          ) : (
+            <div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  if (!urlInput.trim()) return
+                  onValueChange(urlInput.trim())
+                  setOpen(false)
+                }}
+                className="flex gap-2"
+              >
+                <input
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  className="input-field"
+                  placeholder="https://.../imagen.jpg"
+                />
+                <button type="submit" className="btn-primary !px-4">
+                  Usar
+                </button>
+              </form>
+              <p className="mt-3 text-xs text-zinc-600">
+                Pega el enlace de cualquier imagen (Unsplash, tu CDN, etc.).
+              </p>
             </div>
           )}
         </div>

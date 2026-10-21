@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { ArrowLeft, ArrowRight, Clock, Tag } from 'lucide-react'
 import { getAllPosts, formatDate } from '@/lib/blog'
 
-export const revalidate = 3600
+export const dynamic = 'force-static'
 
 export const metadata: Metadata = {
   title: 'Blog — IA, desarrollo y negocios digitales',

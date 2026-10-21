@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Send, CheckCircle2, Loader2, AlertCircle } from 'lucide-react'
 import { siteConfig } from '@/lib/site'
+import { submitLead } from '@/lib/firebase/data'
 
 type Status = 'idle' | 'sending' | 'sent' | 'error'
 
@@ -19,17 +20,19 @@ export default function ContactForm() {
     setStatus('sending')
     setError('')
 
-    try {
-      const res = await fetch('/api/contact', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      })
-      const data = await res.json()
+    // Honeypot: si el campo oculto viene lleno, es un bot.
+    if (form.company.trim() !== '') {
+      setStatus('sent')
+      return
+    }
 
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || 'No pudimos enviar tu mensaje. Intenta de nuevo.')
-      }
+    try {
+      await submitLead({
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        message: form.message,
+      })
       setStatus('sent')
     } catch (err) {
       setStatus('error')
